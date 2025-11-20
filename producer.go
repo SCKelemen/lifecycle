@@ -13,8 +13,15 @@ import (
 // Producer provides a high-level API for emitting structured lifecycle events
 // It replaces standard loggers to prevent direct logging
 // These are OBSERVABILITY events for engineers, NOT domain events
+//
+// Architecture notes:
+// - A single service may host multiple APIs (e.g., user-service hosts examples.User and examples.Order)
+// - A single API may span multiple services (e.g., examples.User API in user-service and user-cache-service)
+// - Service: identifies the service instance (e.g., "user-service-pod-123")
+// - API: identifies the API/resource type (e.g., "examples.User", "idp.Account") - optional for service-level events
 type Producer struct {
 	service     string
+	api         string // Optional: API identifier for API-specific events
 	host        string
 	logger      *slog.Logger
 	output      io.Writer
@@ -61,12 +68,25 @@ func WithOTelIntegration(otel *OTelIntegration) ProducerOption {
 	}
 }
 
+// WithAPI sets the API identifier for API-specific events
+// This allows a single service to emit events for multiple APIs
+func WithAPI(api string) ProducerOption {
+	return func(p *Producer) {
+		p.api = api
+	}
+}
+
 // NewProducer creates a new lifecycle event producer
 // This replaces standard loggers - developers should use this instead of log.Printf, etc.
 // These are OBSERVABILITY events for engineers, NOT domain events
+//
+// service: Service instance identifier (e.g., "user-service-pod-123")
+// host: Host/pod identifier (e.g., "pod-123")
+// api: Optional API identifier (e.g., "examples.User") - can be set via WithAPI option or per-event
 func NewProducer(service, host string, opts ...ProducerOption) *Producer {
 	p := &Producer{
 		service:     service,
+		api:         "", // Default: no API specified (service-level events)
 		host:        host,
 		logger:      slog.Default(),
 		output:      os.Stdout,
@@ -83,11 +103,18 @@ func NewProducer(service, host string, opts ...ProducerOption) *Producer {
 }
 
 // createBaseEvent creates a base event with common fields
-func (p *Producer) createBaseEvent(eventType, correlationID string, metadata map[string]interface{}) *BaseEvent {
+// api can be empty for service-level events, or specified for API-specific events
+func (p *Producer) createBaseEvent(eventType, correlationID string, metadata map[string]interface{}, api ...string) *BaseEvent {
+	apiID := p.api // Default to producer-level API
+	if len(api) > 0 && api[0] != "" {
+		apiID = api[0] // Override with per-event API if provided
+	}
+
 	base := &BaseEvent{
 		EventType:     eventType,
 		Timestamp:     time.Now(),
 		Service:       p.service,
+		API:           apiID,
 		Host:          p.host,
 		CorrelationID: correlationID,
 		Metadata:      metadata,
@@ -96,7 +123,9 @@ func (p *Producer) createBaseEvent(eventType, correlationID string, metadata map
 	return base
 }
 
-// redactData redacts PII from data based on schema annotations
+// redactData redacts PII from data based on schema annotations from the API generator
+// schemaAnnotations: Map of field name -> FieldAnnotations from the API schema system
+// Fields are redacted if they have PII=true OR Redactable=true OR Encrypted=true
 func (p *Producer) redactData(data map[string]interface{}, schemaAnnotations map[string]FieldAnnotations) map[string]interface{} {
 	if data == nil {
 		return nil
@@ -104,15 +133,43 @@ func (p *Producer) redactData(data map[string]interface{}, schemaAnnotations map
 
 	redacted := make(map[string]interface{})
 	for key, value := range data {
-		// Check if field has PII annotations
+		// Check if field has PII annotations from schema
 		annotations, hasAnnotations := schemaAnnotations[key]
-		if hasAnnotations && (annotations.Encrypted || annotations.Redactable) {
+
+		// Redact if field is marked as PII, redactable, or encrypted in schema
+		shouldRedact := false
+		if hasAnnotations {
+			shouldRedact = annotations.PII || annotations.Redactable || annotations.Encrypted || annotations.Sensitive
+		}
+
+		// Also check if value itself looks like PII (fallback if no schema annotations)
+		if !shouldRedact {
+			shouldRedact = p.piiDetector.IsPIIField(key) || p.piiDetector.IsPIIValue(value)
+		}
+
+		if shouldRedact {
 			// Redact PII fields
 			redacted[key] = p.redactor.Redact(value)
 		} else {
 			// Recursively check nested structures
 			if nestedMap, ok := value.(map[string]interface{}); ok {
 				redacted[key] = p.redactData(nestedMap, schemaAnnotations)
+			} else if nestedSlice, ok := value.([]interface{}); ok {
+				// Handle arrays/slices
+				redactedSlice := make([]interface{}, len(nestedSlice))
+				for i, item := range nestedSlice {
+					if itemMap, ok := item.(map[string]interface{}); ok {
+						redactedSlice[i] = p.redactData(itemMap, schemaAnnotations)
+					} else {
+						// Check if item itself is PII
+						if p.piiDetector.IsPIIValue(item) {
+							redactedSlice[i] = p.redactor.Redact(item)
+						} else {
+							redactedSlice[i] = item
+						}
+					}
+				}
+				redacted[key] = redactedSlice
 			} else {
 				redacted[key] = value
 			}
@@ -198,22 +255,32 @@ func (p *Producer) EmitServiceCrashed(ctx context.Context, reason, stackTrace st
 // API Events
 
 // EmitRequestReceived emits an api.request.received event
-func (p *Producer) EmitRequestReceived(ctx context.Context, correlationID, method, path string, metadata map[string]interface{}) error {
+// api: Optional API identifier (e.g., "examples.User") - if not provided, uses producer-level API
+func (p *Producer) EmitRequestReceived(ctx context.Context, correlationID, method, path string, metadata map[string]interface{}, api ...string) error {
 	event := &RequestReceivedEvent{
-		Base:    p.createBaseEvent("api.request.received", correlationID, metadata),
-		Method:  method,
-		Path:    path,
-		UserAgent: extractUserAgent(ctx),
+		Base:       p.createBaseEvent("api.request.received", correlationID, metadata, api...),
+		Method:     method,
+		Path:       path,
+		UserAgent:  extractUserAgent(ctx),
 		RemoteAddr: extractRemoteAddr(ctx),
 	}
 	return p.emitEvent(ctx, event, 0)
 }
 
 // EmitRequestHandled emits an api.request.handled event
+// api: Optional API identifier (e.g., "examples.User") - if not provided, uses producer-level API or resource type
 func (p *Producer) EmitRequestHandled(ctx context.Context, correlationID string, actor *Actor, resource *Resource,
-	statusCode int32, durationMs int64, responseSizeBytes int64) error {
+	statusCode int32, durationMs int64, responseSizeBytes int64, api ...string) error {
+	// If API not provided, try to infer from resource type
+	apiID := ""
+	if len(api) > 0 && api[0] != "" {
+		apiID = api[0]
+	} else if resource != nil && resource.Type != "" {
+		apiID = resource.Type // Use resource type as API identifier
+	}
+
 	event := &RequestHandledEvent{
-		Base:              p.createBaseEvent("api.request.handled", correlationID, nil),
+		Base:              p.createBaseEvent("api.request.handled", correlationID, nil, apiID),
 		Actor:             actor,
 		Resource:          resource,
 		Status:            StatusSuccess,
@@ -225,10 +292,11 @@ func (p *Producer) EmitRequestHandled(ctx context.Context, correlationID string,
 }
 
 // EmitRequestErrored emits an api.request.errored event
+// api: Optional API identifier (e.g., "examples.User") - if not provided, uses producer-level API
 func (p *Producer) EmitRequestErrored(ctx context.Context, correlationID, errorMessage, errorCode string,
-	statusCode int32, durationMs int64) error {
+	statusCode int32, durationMs int64, api ...string) error {
 	event := &RequestErroredEvent{
-		Base:         p.createBaseEvent("api.request.errored", correlationID, nil),
+		Base:         p.createBaseEvent("api.request.errored", correlationID, nil, api...),
 		Status:       StatusError,
 		ErrorMessage: errorMessage,
 		ErrorCode:    errorCode,
@@ -256,9 +324,9 @@ func (p *Producer) EmitRequestRetried(ctx context.Context, correlationID string,
 func (p *Producer) EmitQueryStarted(ctx context.Context, queryID, query string, params []interface{}) error {
 	// Redact PII from query parameters
 	redactedParams := p.redactor.RedactParams(params)
-	
+
 	event := &QueryStartedEvent{
-		Base:   p.createBaseEvent("db.query.started", extractCorrelationID(ctx), nil),
+		Base:    p.createBaseEvent("db.query.started", extractCorrelationID(ctx), nil),
 		QueryID: queryID,
 		Query:   query,
 		Params:  redactedParams,
@@ -269,10 +337,10 @@ func (p *Producer) EmitQueryStarted(ctx context.Context, queryID, query string, 
 // EmitQueryCompleted emits a db.query.completed event
 func (p *Producer) EmitQueryCompleted(ctx context.Context, queryID string, durationMs int64, rowsAffected int64) error {
 	event := &QueryCompletedEvent{
-		Base:          p.createBaseEvent("db.query.completed", extractCorrelationID(ctx), nil),
-		QueryID:       queryID,
-		DurationMs:    durationMs,
-		RowsAffected:  rowsAffected,
+		Base:         p.createBaseEvent("db.query.completed", extractCorrelationID(ctx), nil),
+		QueryID:      queryID,
+		DurationMs:   durationMs,
+		RowsAffected: rowsAffected,
 	}
 	return p.emitEvent(ctx, event, time.Duration(durationMs)*time.Millisecond)
 }
@@ -303,7 +371,7 @@ func (p *Producer) EmitTransactionCommitted(ctx context.Context, transactionID s
 	event := &TransactionCommittedEvent{
 		Base:          p.createBaseEvent("db.transaction.committed", extractCorrelationID(ctx), nil),
 		TransactionID: transactionID,
-		DurationMs:   durationMs,
+		DurationMs:    durationMs,
 	}
 	return p.emitEvent(ctx, event, time.Duration(durationMs)*time.Millisecond)
 }
@@ -322,13 +390,22 @@ func (p *Producer) EmitTransactionRolledBack(ctx context.Context, transactionID,
 // Resource Events
 
 // EmitResourceCreated emits a resource.created event
+// api: Optional API identifier (e.g., "examples.User") - if not provided, uses producer-level API or resource type
 func (p *Producer) EmitResourceCreated(ctx context.Context, correlationID string, actor *Actor,
-	resource *Resource, resourceData map[string]interface{}, schemaAnnotations map[string]FieldAnnotations) error {
+	resource *Resource, resourceData map[string]interface{}, schemaAnnotations map[string]FieldAnnotations, api ...string) error {
 	// Redact PII from resource data
 	redactedData := p.redactData(resourceData, schemaAnnotations)
-	
+
+	// If API not provided, try to infer from resource type
+	apiID := ""
+	if len(api) > 0 && api[0] != "" {
+		apiID = api[0]
+	} else if resource != nil && resource.Type != "" {
+		apiID = resource.Type // Use resource type as API identifier
+	}
+
 	event := &ResourceCreatedEvent{
-		Base:         p.createBaseEvent("resource.created", correlationID, nil),
+		Base:         p.createBaseEvent("resource.created", correlationID, nil, apiID),
 		Actor:        actor,
 		Resource:     resource,
 		ResourceData: redactedData,
@@ -337,14 +414,23 @@ func (p *Producer) EmitResourceCreated(ctx context.Context, correlationID string
 }
 
 // EmitResourceUpdated emits a resource.updated event
+// api: Optional API identifier (e.g., "examples.User") - if not provided, uses producer-level API or resource type
 func (p *Producer) EmitResourceUpdated(ctx context.Context, correlationID string, actor *Actor,
-	resource *Resource, previousData, newData map[string]interface{}, updatedFields []string, schemaAnnotations map[string]FieldAnnotations) error {
+	resource *Resource, previousData, newData map[string]interface{}, updatedFields []string, schemaAnnotations map[string]FieldAnnotations, api ...string) error {
 	// Redact PII from both previous and new data
 	redactedPrevious := p.redactData(previousData, schemaAnnotations)
 	redactedNew := p.redactData(newData, schemaAnnotations)
-	
+
+	// If API not provided, try to infer from resource type
+	apiID := ""
+	if len(api) > 0 && api[0] != "" {
+		apiID = api[0]
+	} else if resource != nil && resource.Type != "" {
+		apiID = resource.Type // Use resource type as API identifier
+	}
+
 	event := &ResourceUpdatedEvent{
-		Base:          p.createBaseEvent("resource.updated", correlationID, nil),
+		Base:          p.createBaseEvent("resource.updated", correlationID, nil, apiID),
 		Actor:         actor,
 		Resource:      resource,
 		PreviousData:  redactedPrevious,
@@ -355,13 +441,22 @@ func (p *Producer) EmitResourceUpdated(ctx context.Context, correlationID string
 }
 
 // EmitResourceDeleted emits a resource.deleted event
+// api: Optional API identifier (e.g., "examples.User") - if not provided, uses producer-level API or resource type
 func (p *Producer) EmitResourceDeleted(ctx context.Context, correlationID string, actor *Actor,
-	resource *Resource, softDelete bool, finalData map[string]interface{}, schemaAnnotations map[string]FieldAnnotations) error {
+	resource *Resource, softDelete bool, finalData map[string]interface{}, schemaAnnotations map[string]FieldAnnotations, api ...string) error {
 	// Redact PII from final data
 	redactedData := p.redactData(finalData, schemaAnnotations)
-	
+
+	// If API not provided, try to infer from resource type
+	apiID := ""
+	if len(api) > 0 && api[0] != "" {
+		apiID = api[0]
+	} else if resource != nil && resource.Type != "" {
+		apiID = resource.Type // Use resource type as API identifier
+	}
+
 	event := &ResourceDeletedEvent{
-		Base:       p.createBaseEvent("resource.deleted", correlationID, nil),
+		Base:       p.createBaseEvent("resource.deleted", correlationID, nil, apiID),
 		Actor:      actor,
 		Resource:   resource,
 		SoftDelete: softDelete,
@@ -395,4 +490,3 @@ func extractRemoteAddr(ctx context.Context) string {
 	}
 	return ""
 }
-

@@ -6,6 +6,14 @@ A structured observability library that prevents direct logging and enforces lif
 
 This library replaces ad-hoc log statements with typed, structured observability events. These are **NOT domain events** - they are **observability events for engineers** to monitor, debug, and understand system behavior.
 
+### Architecture Support
+
+The library supports complex service architectures:
+- **Multiple APIs per service**: A single service can host multiple APIs (e.g., `user-service` hosting both `examples.User` and `examples.Order` APIs)
+- **APIs across services**: A single API can span multiple services (e.g., `examples.User` API implemented across `user-service`, `user-cache-service`, and `user-search-service`)
+
+Events include both `service` (service instance) and `api` (API identifier) fields to enable filtering and aggregation at both levels.
+
 It enforces structured observability to:
 
 1. **Prevent direct logging** - Developers cannot use standard loggers directly
@@ -81,14 +89,22 @@ import (
 
 func main() {
     // Create lifecycle producer (replaces standard logger)
-    producer := lifecycle.NewProducer("my-service", "pod-123")
+    // Service: "user-service-pod-123" (service instance)
+    // API: "examples.User" (optional - can be set per-event or via WithAPI)
+    producer := lifecycle.NewProducer("user-service-pod-123", "pod-123",
+        lifecycle.WithAPI("examples.User"), // Optional: set default API
+    )
     
-    // Service lifecycle (creates OTel span)
+    // Service lifecycle (creates OTel span) - no API field
     producer.EmitServiceStarted(context.Background(), "v1.0.0", 12345)
     
-    // API events (creates OTel span + metrics)
+    // API events (creates OTel span + metrics) - API inferred from producer or resource
     producer.EmitRequestReceived(context.Background(), 
-        "req-123", "GET", "/api/users", nil)
+        "req-123", "GET", "/api/users", nil, "examples.User") // API can be specified per-event
+    
+    // Multiple APIs in same service
+    producer.EmitRequestReceived(context.Background(), 
+        "req-124", "GET", "/api/orders", nil, "examples.Order") // Different API
     
     // DB tracing (creates OTel span)
     producer.EmitQueryStarted(context.Background(), 
@@ -98,17 +114,35 @@ func main() {
 
 ## PII Handling
 
-The library automatically detects and redacts PII based on schema annotations:
+The library automatically detects and redacts PII based on schema annotations from the API generator:
 
 ```go
-// Fields marked with `field: { encrypted: true, redactable: true }` 
-// are automatically redacted in events
+// Fields marked with `field: { pii: true, encrypted: true, redactable: true }` 
+// in the API schema are automatically redacted in events
+schemaAnnotations := map[string]lifecycle.FieldAnnotations{
+    "email": {PII: true, Encrypted: true, Redactable: true},
+    "phone": {PII: true, Encrypted: true, Redactable: true},
+    "name":  {PII: true, Redactable: true},
+}
+
 producer.EmitResourceCreated(ctx, correlationID, actor, resource, 
     map[string]interface{}{
-        "email": "user@example.com",  // Will be redacted if marked as PII
-        "name": "John Doe",            // Will be redacted if marked as PII
-    })
+        "email": "user@example.com",  // Will be redacted (PII=true)
+        "phone": "+1234567890",        // Will be redacted (PII=true)
+        "name": "John Doe",            // Will be redacted (PII=true)
+        "id": "user-123",              // Not redacted (no PII annotation)
+    }, schemaAnnotations)
 ```
+
+### Schema Integration
+
+The library integrates with the API schema system's `FieldFlags` annotations:
+- **`pii: true`** - Field contains personally identifiable information
+- **`encrypted: true`** - Field requires encryption (also triggers redaction)
+- **`redactable: true`** - Field can be redacted for GDPR Article 17
+- **`sensitive: true`** - General sensitive data flag
+
+Fields are redacted if they have **any** of these flags set. The library also falls back to pattern-based detection if schema annotations are not provided.
 
 ## OpenTelemetry Setup
 

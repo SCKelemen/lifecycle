@@ -7,6 +7,7 @@ type Event interface {
 	GetEventType() string
 	GetTimestamp() time.Time
 	GetService() string
+	GetAPI() string
 	GetHost() string
 	GetCorrelationID() string
 }
@@ -21,8 +22,9 @@ type EventWithData interface {
 type BaseEvent struct {
 	EventType     string                 `json:"event_type"`
 	Timestamp     time.Time              `json:"timestamp"`
-	Service       string                 `json:"service"`
-	Host          string                 `json:"host"`
+	Service       string                 `json:"service"`       // Service instance (e.g., "user-service-pod-123")
+	API           string                 `json:"api,omitempty"` // API identifier (e.g., "examples.User", "idp.Account") - can be empty for service-level events
+	Host          string                 `json:"host"`          // Host/pod identifier
 	CorrelationID string                 `json:"correlation_id,omitempty"`
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -30,6 +32,7 @@ type BaseEvent struct {
 func (e *BaseEvent) GetEventType() string     { return e.EventType }
 func (e *BaseEvent) GetTimestamp() time.Time  { return e.Timestamp }
 func (e *BaseEvent) GetService() string       { return e.Service }
+func (e *BaseEvent) GetAPI() string           { return e.API }
 func (e *BaseEvent) GetHost() string          { return e.Host }
 func (e *BaseEvent) GetCorrelationID() string { return e.CorrelationID }
 
@@ -74,6 +77,7 @@ type ServiceStartedEvent struct {
 func (e *ServiceStartedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *ServiceStartedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *ServiceStartedEvent) GetService() string       { return e.Base.GetService() }
+func (e *ServiceStartedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *ServiceStartedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *ServiceStartedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -86,6 +90,7 @@ type ServiceHealthyEvent struct {
 func (e *ServiceHealthyEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *ServiceHealthyEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *ServiceHealthyEvent) GetService() string       { return e.Base.GetService() }
+func (e *ServiceHealthyEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *ServiceHealthyEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *ServiceHealthyEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -99,6 +104,7 @@ type ServiceShutdownEvent struct {
 func (e *ServiceShutdownEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *ServiceShutdownEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *ServiceShutdownEvent) GetService() string       { return e.Base.GetService() }
+func (e *ServiceShutdownEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *ServiceShutdownEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *ServiceShutdownEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -113,6 +119,7 @@ type ServiceCrashedEvent struct {
 func (e *ServiceCrashedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *ServiceCrashedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *ServiceCrashedEvent) GetService() string       { return e.Base.GetService() }
+func (e *ServiceCrashedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *ServiceCrashedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *ServiceCrashedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -130,6 +137,7 @@ type RequestReceivedEvent struct {
 func (e *RequestReceivedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *RequestReceivedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *RequestReceivedEvent) GetService() string       { return e.Base.GetService() }
+func (e *RequestReceivedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *RequestReceivedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *RequestReceivedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -147,6 +155,7 @@ type RequestHandledEvent struct {
 func (e *RequestHandledEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *RequestHandledEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *RequestHandledEvent) GetService() string       { return e.Base.GetService() }
+func (e *RequestHandledEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *RequestHandledEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *RequestHandledEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -163,6 +172,7 @@ type RequestErroredEvent struct {
 func (e *RequestErroredEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *RequestErroredEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *RequestErroredEvent) GetService() string       { return e.Base.GetService() }
+func (e *RequestErroredEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *RequestErroredEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *RequestErroredEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -177,6 +187,7 @@ type RequestRetriedEvent struct {
 func (e *RequestRetriedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *RequestRetriedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *RequestRetriedEvent) GetService() string       { return e.Base.GetService() }
+func (e *RequestRetriedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *RequestRetriedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *RequestRetriedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -193,6 +204,7 @@ type QueryStartedEvent struct {
 func (e *QueryStartedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *QueryStartedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *QueryStartedEvent) GetService() string       { return e.Base.GetService() }
+func (e *QueryStartedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *QueryStartedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *QueryStartedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -207,6 +219,7 @@ type QueryCompletedEvent struct {
 func (e *QueryCompletedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *QueryCompletedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *QueryCompletedEvent) GetService() string       { return e.Base.GetService() }
+func (e *QueryCompletedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *QueryCompletedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *QueryCompletedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -222,6 +235,7 @@ type QueryErroredEvent struct {
 func (e *QueryErroredEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *QueryErroredEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *QueryErroredEvent) GetService() string       { return e.Base.GetService() }
+func (e *QueryErroredEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *QueryErroredEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *QueryErroredEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -234,6 +248,7 @@ type TransactionStartedEvent struct {
 func (e *TransactionStartedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *TransactionStartedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *TransactionStartedEvent) GetService() string       { return e.Base.GetService() }
+func (e *TransactionStartedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *TransactionStartedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *TransactionStartedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -247,6 +262,7 @@ type TransactionCommittedEvent struct {
 func (e *TransactionCommittedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *TransactionCommittedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *TransactionCommittedEvent) GetService() string       { return e.Base.GetService() }
+func (e *TransactionCommittedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *TransactionCommittedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *TransactionCommittedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -261,6 +277,7 @@ type TransactionRolledBackEvent struct {
 func (e *TransactionRolledBackEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *TransactionRolledBackEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *TransactionRolledBackEvent) GetService() string       { return e.Base.GetService() }
+func (e *TransactionRolledBackEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *TransactionRolledBackEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *TransactionRolledBackEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -277,6 +294,7 @@ type ResourceCreatedEvent struct {
 func (e *ResourceCreatedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *ResourceCreatedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *ResourceCreatedEvent) GetService() string       { return e.Base.GetService() }
+func (e *ResourceCreatedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *ResourceCreatedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *ResourceCreatedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -299,6 +317,7 @@ type ResourceUpdatedEvent struct {
 func (e *ResourceUpdatedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *ResourceUpdatedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *ResourceUpdatedEvent) GetService() string       { return e.Base.GetService() }
+func (e *ResourceUpdatedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *ResourceUpdatedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *ResourceUpdatedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -323,6 +342,7 @@ type ResourceDeletedEvent struct {
 func (e *ResourceDeletedEvent) GetEventType() string     { return e.Base.GetEventType() }
 func (e *ResourceDeletedEvent) GetTimestamp() time.Time  { return e.Base.GetTimestamp() }
 func (e *ResourceDeletedEvent) GetService() string       { return e.Base.GetService() }
+func (e *ResourceDeletedEvent) GetAPI() string           { return e.Base.GetAPI() }
 func (e *ResourceDeletedEvent) GetHost() string          { return e.Base.GetHost() }
 func (e *ResourceDeletedEvent) GetCorrelationID() string { return e.Base.GetCorrelationID() }
 
@@ -332,8 +352,12 @@ func (e *ResourceDeletedEvent) RedactPII(detector *PIIDetector, redactor *Redact
 	}
 }
 
-// FieldAnnotations represents field-level annotations from the schema system
+// FieldAnnotations represents field-level annotations from the API schema system
+// These match the FieldFlags from the API generator
 type FieldAnnotations struct {
-	Encrypted  bool `json:"encrypted"`
-	Redactable bool `json:"redactable"`
+	PII        bool `json:"pii"`        // Contains personally identifiable information
+	Encrypted  bool `json:"encrypted"`  // Field-level encryption required
+	Redactable bool `json:"redactable"` // Can be redacted for GDPR Article 17
+	Sensitive  bool `json:"sensitive"`  // Sensitive data (general)
+	Immutable  bool `json:"immutable"`  // Field cannot be modified
 }

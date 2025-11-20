@@ -121,6 +121,11 @@ func EventAttributes(event Event) []attribute.KeyValue {
 		attribute.String("service.instance.id", event.GetHost()),
 	}
 
+	// Add API identifier if present (allows filtering by API across services)
+	if api := event.GetAPI(); api != "" {
+		attrs = append(attrs, attribute.String("api.name", api))
+	}
+
 	if correlationID := event.GetCorrelationID(); correlationID != "" {
 		attrs = append(attrs, attribute.String("correlation.id", correlationID))
 	}

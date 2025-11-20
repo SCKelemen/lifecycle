@@ -45,10 +45,12 @@ func main() {
 		"phone": "+1234567890",          // This will be redacted
 	}
 
-	// Schema annotations indicate which fields are PII
+	// Schema annotations from API generator indicate which fields are PII
+	// These match the FieldFlags from the API schema system
 	schemaAnnotations := map[string]lifecycle.FieldAnnotations{
-		"email": {Encrypted: true, Redactable: true},
-		"phone": {Encrypted: true, Redactable: true},
+		"email": {PII: true, Encrypted: true, Redactable: true},
+		"phone": {PII: true, Encrypted: true, Redactable: true},
+		"name":  {PII: true, Redactable: true},
 	}
 
 	producer.EmitResourceCreated(ctx, correlationID, actor, resource, resourceData, schemaAnnotations)
@@ -57,4 +59,3 @@ func main() {
 	fmt.Println("\n=== Service Shutdown ===")
 	producer.EmitServiceShutdown(ctx, "graceful", 0)
 }
-
