@@ -13,9 +13,9 @@ import (
 
 // OTelIntegration provides OpenTelemetry integration for lifecycle events
 type OTelIntegration struct {
-	tracer  trace.Tracer
-	meter   metric.Meter
-	counter map[string]metric.Int64Counter
+	tracer    trace.Tracer
+	meter     metric.Meter
+	counter   map[string]metric.Int64Counter
 	histogram map[string]metric.Float64Histogram
 }
 
@@ -25,9 +25,9 @@ func NewOTelIntegration(serviceName string) *OTelIntegration {
 	meter := otel.Meter("lifecycle")
 
 	return &OTelIntegration{
-		tracer:   tracer,
-		meter:    meter,
-		counter:  make(map[string]metric.Int64Counter),
+		tracer:    tracer,
+		meter:     meter,
+		counter:   make(map[string]metric.Int64Counter),
 		histogram: make(map[string]metric.Float64Histogram),
 	}
 }
@@ -132,4 +132,3 @@ func EventAttributes(event Event) []attribute.KeyValue {
 
 	return attrs
 }
-

@@ -33,3 +33,4 @@ func NewResource(resourceType, id string) *Resource {
 	}
 }
 
+

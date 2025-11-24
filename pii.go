@@ -240,3 +240,4 @@ func (r *Redactor) MaskPhone(phone string) string {
 	return phone[:2] + strings.Repeat("*", len(phone)-4) + phone[len(phone)-2:]
 }
 
+
