@@ -52,8 +52,12 @@ func WithStyledColorRegistry(registry *ColorRegistry) StyledOutputOption {
 
 // NewStyledOutput creates a new styled output handler
 func NewStyledOutput(w io.Writer, opts ...StyledOutputOption) *StyledOutput {
+	// Create logger - charmbracelet/log will auto-detect color support
+	logger := log.New(w)
+	logger.SetReportCaller(false) // Don't report caller
+
 	s := &StyledOutput{
-		logger:        log.New(w),
+		logger:        logger,
 		jsonOutput:    nil, // No separate JSON output by default
 		jsonOnly:      false,
 		colorRegistry: NewColorRegistry(), // Default color registry
