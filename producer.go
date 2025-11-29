@@ -20,14 +20,16 @@ import (
 // - Service: identifies the service instance (e.g., "user-service-pod-123")
 // - API: identifies the API/resource type (e.g., "examples.User", "idp.Account") - optional for service-level events
 type Producer struct {
-	service     string
-	api         string // Optional: API identifier for API-specific events
-	host        string
-	logger      *slog.Logger
-	output      io.Writer
-	piiDetector *PIIDetector
-	redactor    *Redactor
-	otel        *OTelIntegration
+	service       string
+	api           string // Optional: API identifier for API-specific events
+	host          string
+	logger        *slog.Logger
+	output        io.Writer
+	styled        *StyledOutput  // Optional: styled output for beautiful terminal logs
+	colorRegistry *ColorRegistry // Color registry for services, APIs, events, statuses
+	piiDetector   *PIIDetector
+	redactor      *Redactor
+	otel          *OTelIntegration
 }
 
 // ProducerOption configures the Producer
@@ -76,6 +78,23 @@ func WithAPI(api string) ProducerOption {
 	}
 }
 
+// WithStyledOutput enables beautiful terminal styling using charmbracelet/log
+// When enabled, events are displayed with colors and formatting in the terminal
+// JSON output is still available via WithJSONOutput option on StyledOutput
+func WithStyledOutput(styled *StyledOutput) ProducerOption {
+	return func(p *Producer) {
+		p.styled = styled
+	}
+}
+
+// WithColorRegistry sets a color registry for services, APIs, events, and statuses
+// Colors come from type/event annotations in the API generator
+func WithColorRegistry(registry *ColorRegistry) ProducerOption {
+	return func(p *Producer) {
+		p.colorRegistry = registry
+	}
+}
+
 // NewProducer creates a new lifecycle event producer
 // This replaces standard loggers - developers should use this instead of log.Printf, etc.
 // These are OBSERVABILITY events for engineers, NOT domain events
@@ -85,18 +104,25 @@ func WithAPI(api string) ProducerOption {
 // api: Optional API identifier (e.g., "examples.User") - can be set via WithAPI option or per-event
 func NewProducer(service, host string, opts ...ProducerOption) *Producer {
 	p := &Producer{
-		service:     service,
-		api:         "", // Default: no API specified (service-level events)
-		host:        host,
-		logger:      slog.Default(),
-		output:      os.Stdout,
-		piiDetector: NewPIIDetector(),
-		redactor:    NewRedactor(),
-		otel:        NewOTelIntegration(service),
+		service:       service,
+		api:           "", // Default: no API specified (service-level events)
+		host:          host,
+		logger:        slog.Default(),
+		output:        os.Stdout,
+		colorRegistry: NewColorRegistry(), // Default color registry
+		piiDetector:   NewPIIDetector(),
+		redactor:      NewRedactor(),
+		otel:          NewOTelIntegration(service),
 	}
 
 	for _, opt := range opts {
 		opt(p)
+	}
+
+	// Register service color if registry is available
+	if p.colorRegistry != nil {
+		// Service color can be set via environment or configuration
+		// For now, we'll use a default or let it be set externally
 	}
 
 	return p
@@ -197,14 +223,23 @@ func (p *Producer) emitEvent(ctx context.Context, event Event, duration time.Dur
 		p.otel.RecordMetric(spanCtx, event.GetEventType(), duration, attrs...)
 	}
 
-	// Emit structured log (JSON)
-	jsonData, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
-	}
+	// Emit output (styled or JSON)
+	if p.styled != nil {
+		// Use styled output (beautiful terminal formatting)
+		// StyledOutput handles JSON output separately if configured
+		if err := p.styled.WriteEvent(event); err != nil {
+			return fmt.Errorf("failed to write styled event: %w", err)
+		}
+	} else {
+		// Default: emit structured JSON log
+		jsonData, err := json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("failed to marshal event: %w", err)
+		}
 
-	if _, err := fmt.Fprintln(p.output, string(jsonData)); err != nil {
-		return fmt.Errorf("failed to write event: %w", err)
+		if _, err := fmt.Fprintln(p.output, string(jsonData)); err != nil {
+			return fmt.Errorf("failed to write event: %w", err)
+		}
 	}
 
 	return nil
